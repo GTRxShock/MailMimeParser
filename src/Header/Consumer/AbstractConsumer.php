@@ -8,6 +8,7 @@ namespace ZBateson\MailMimeParser\Header\Consumer;
 
 use ZBateson\MailMimeParser\Header\Consumer\ConsumerService;
 use ZBateson\MailMimeParser\Header\Part\HeaderPartFactory;
+use ZBateson\MailMimeParser\Header\Part\MimeLiteralPart;
 use SplFixedArray;
 use Iterator;
 use NoRewindIterator;
@@ -94,7 +95,7 @@ abstract class AbstractConsumer
      * 
      * @return \ZBateson\MailMimeParser\Header\AbstractConsumer[]
      */
-    private function getAllConsumers()
+    protected function getAllConsumers()
     {
         $found = [$this];
         do {
@@ -144,7 +145,7 @@ abstract class AbstractConsumer
      * 
      * @return string[] an array of regular expression markers
      */
-    private function getAllTokenSeparators()
+    protected function getAllTokenSeparators()
     {
         $markers = $this->getTokenSeparators();
         $subConsumers = $this->getAllConsumers();
@@ -164,7 +165,8 @@ abstract class AbstractConsumer
     protected function getTokenSplitPattern()
     {
         $sChars = implode('|', $this->getAllTokenSeparators());
-        return '~(\\\\.|' . $sChars . ')~';
+        $mimePartPattern = MimeLiteralPart::MIME_PART_PATTERN;
+        return '~(' . $mimePartPattern . '|\\\\.|' . $sChars . ')~';
     }
     
     /**
@@ -235,7 +237,7 @@ abstract class AbstractConsumer
      * @param Iterator $tokens
      * @return \ZBateson\MailMimeParser\Header\Part\HeaderPart[]|array
      */
-    private function getConsumerTokenParts(Iterator $tokens)
+    protected function getConsumerTokenParts(Iterator $tokens)
     {
         $token = $tokens->current();
         $subConsumers = $this->getSubConsumers();

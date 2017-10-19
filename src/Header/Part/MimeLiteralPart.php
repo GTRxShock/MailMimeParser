@@ -6,6 +6,8 @@
  */
 namespace ZBateson\MailMimeParser\Header\Part;
 
+use ZBateson\MailMimeParser\Stream\Helper\CharsetConverter;
+
 /**
  * Represents a single mime header part token, with the possibility of it being
  * MIME-Encoded as per RFC-2047.
@@ -19,7 +21,7 @@ class MimeLiteralPart extends LiteralPart
     /**
      * @var string regex pattern matching a mime-encoded part
      */
-    protected $mimePartPattern = '=\?[A-Za-z\-0-9]+\?[QBqb]\?[^\?]+\?=';
+    const MIME_PART_PATTERN = '=\?[A-Za-z\-_0-9]+\?[QBqb]\?[^\?]+\?=';
     
     /**
      * @var bool set to true to ignore spaces before this part
@@ -42,8 +44,9 @@ class MimeLiteralPart extends LiteralPart
     {
         $this->value = $this->decodeMime($token);
         // preg_match returns int
-        $this->canIgnoreSpacesBefore = (bool) preg_match("/^\s*{$this->mimePartPattern}/", $token);
-        $this->canIgnoreSpacesAfter = (bool) preg_match("/{$this->mimePartPattern}\s*\$/", $token);
+        $pattern = self::MIME_PART_PATTERN;
+        $this->canIgnoreSpacesBefore = (bool) preg_match("/^\s*{$pattern}/", $token);
+        $this->canIgnoreSpacesAfter = (bool) preg_match("/{$pattern}\s*\$/", $token);
     }
     
     /**
@@ -58,18 +61,42 @@ class MimeLiteralPart extends LiteralPart
      */
     protected function decodeMime($value)
     {
-        $pattern = $this->mimePartPattern;
+        $pattern = self::MIME_PART_PATTERN;
         $value = preg_replace("/($pattern)\\s+(?=$pattern)/", '$1', $value);
         $aMimeParts = preg_split("/($pattern)/", $value, -1, PREG_SPLIT_DELIM_CAPTURE);
         $ret = '';
-        foreach ($aMimeParts as $part) {
-            if (preg_match("/^$pattern$/", $part)) {
-                $ret .= iconv_mime_decode($part, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8');
-            } else {
-                $ret .= $this->convertEncoding($part);
-            }
+        foreach ($aMimeParts as $entity) {
+            $ret .= $this->decodeMatchedEntity($entity);
         }
         return $ret;
+    }
+    
+    /**
+     * Decodes a single mime-encoded entity.
+     * 
+     * Unfortunately, mb_decode_header fails for many charsets on PHP 5.4 and
+     * PHP 5.5 (even if they're listed as supported).  iconv_mime_decode doesn't
+     * support all charsets.
+     * 
+     * Parsing out the charset and body of the encoded entity seems to be the
+     * way to go to support the most charsets.
+     * 
+     * @param string $entity
+     * @return string
+     */
+    private function decodeMatchedEntity($entity)
+    {
+        if (preg_match("/^=\?([A-Za-z\-_0-9]+)\?([QBqb])\?([^\?]+)\?=$/", $entity, $matches)) {
+            $body = $matches[3];
+            if (strtoupper($matches[2]) === 'Q') {
+                $body = quoted_printable_decode(str_replace('_', '=20', $body));
+            } else {
+                $body = base64_decode($body);
+            }
+            $converter = new CharsetConverter($matches[1], 'UTF-8');
+            return $converter->convert($body);
+        }
+        return $this->convertEncoding($entity);
     }
     
     /**

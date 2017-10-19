@@ -9,6 +9,14 @@ namespace ZBateson\MailMimeParser\Stream;
 use php_user_filter;
 
 /**
+ * Unfortunately neither the built-in base64 decoder in PHP, nor the HHVM
+ * implementation for their ConvertFilter seem to handle large streams
+ * correctly.  There appears to be no provision for data coming in when they're
+ * not split on 4 byte-chunks (each 4-byte chunk of base-64 encoded data
+ * translates to 3-bytes of unencoded data).
+ * 
+ * encoded data).
+ * 
  * @author Zaahid Bateson
  */
 class Base64DecodeStreamFilter extends php_user_filter
@@ -16,7 +24,7 @@ class Base64DecodeStreamFilter extends php_user_filter
     /**
      * Name used when registering with stream_filter_register.
      */
-    const STREAM_FILTER_NAME = 'convert.base64-decode';
+    const STREAM_FILTER_NAME = 'mmp-convert.base64-decode';
     
     /**
      * @var string Leftovers from the last incomplete line that was parsed, to
@@ -38,13 +46,14 @@ class Base64DecodeStreamFilter extends php_user_filter
     private function getRawBytes($bucket)
     {
         $raw = preg_replace('/\s+/', '', $bucket->data);
-        if (!empty($this->leftover)) {
+        if ($this->leftover !== '') {
             $raw = $this->leftover . $raw;
             $this->leftover = '';
         }
-        $nLeftover = strlen($raw) % 3;
+        $nLeftover = strlen($raw) % 4;
         if ($nLeftover !== 0) {
-            $this->leftover = substr($nLeftover, -$nLeftover);
+            $this->leftover = substr($raw, -$nLeftover);
+            $raw = substr($raw, 0, -$nLeftover);
         }
         return $raw;
     }
@@ -63,10 +72,6 @@ class Base64DecodeStreamFilter extends php_user_filter
         while ($bucket = stream_bucket_make_writeable($in)) {
             $bytes = $this->getRawBytes($bucket);
             $nConsumed = strlen($bucket->data);
-            if ($this->leftover !== '') {
-                $nConsumed -= $nConsumed - strlen(rtrim($bucket->data));
-                $nConsumed -= strlen($this->leftover);
-            }
             $consumed += $nConsumed;
             $converted = base64_decode($bytes);
             

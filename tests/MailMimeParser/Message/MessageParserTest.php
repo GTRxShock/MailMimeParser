@@ -1,5 +1,5 @@
 <?php
-namespace ZBateson\MailMimeParser;
+namespace ZBateson\MailMimeParser\Message;
 
 use PHPUnit_Framework_TestCase;
 
@@ -7,8 +7,8 @@ use PHPUnit_Framework_TestCase;
  * Description of ParserTest
  *
  * @group MessageParser
- * @group Base
- * @covers ZBateson\MailMimeParser\MessageParser
+ * @group Message
+ * @covers ZBateson\MailMimeParser\Message\MessageParser
  * @author Zaahid Bateson
  */
 class MessageParserTest extends PHPUnit_Framework_TestCase
@@ -32,7 +32,7 @@ class MessageParserTest extends PHPUnit_Framework_TestCase
     
     protected function getMockedPart()
     {
-        $part = $this->getMockBuilder('ZBateson\MailMimeParser\MimePart')
+        $part = $this->getMockBuilder('ZBateson\MailMimeParser\Message\MimePart')
             ->disableOriginalConstructor()
             ->setMethods(['setRawHeader', 'getHeader', 'getHeaderValue', 'getHeaderParameter'])
             ->getMock();
@@ -41,7 +41,7 @@ class MessageParserTest extends PHPUnit_Framework_TestCase
     
     protected function getMockedUUEncodedPart()
     {
-        $part = $this->getMockBuilder('ZBateson\MailMimeParser\UUEncodedPart')
+        $part = $this->getMockBuilder('ZBateson\MailMimeParser\Message\UUEncodedPart')
             ->disableOriginalConstructor()
             ->setMethods(['setRawHeader', 'getHeader', 'getHeaderValue', 'getHeaderParameter'])
             ->getMock();
@@ -50,7 +50,7 @@ class MessageParserTest extends PHPUnit_Framework_TestCase
     
     protected function getMockedNonMimePart()
     {
-        $part = $this->getMockBuilder('ZBateson\MailMimeParser\NonMimePart')
+        $part = $this->getMockBuilder('ZBateson\MailMimeParser\Message\NonMimePart')
             ->disableOriginalConstructor()
             ->setMethods(['setRawHeader', 'getHeader', 'getHeaderValue', 'getHeaderParameter'])
             ->getMock();
@@ -59,7 +59,7 @@ class MessageParserTest extends PHPUnit_Framework_TestCase
     
     protected function getMockedPartFactory()
     {
-        $partFactory = $this->getMockBuilder('ZBateson\MailMimeParser\MimePartFactory')
+        $partFactory = $this->getMockBuilder('ZBateson\MailMimeParser\Message\MimePartFactory')
             ->disableOriginalConstructor()
             ->getMock();
         return $partFactory;
@@ -112,7 +112,7 @@ class MessageParserTest extends PHPUnit_Framework_TestCase
         }));
         $partStreamRegistry = $this->getMockedPartStreamRegistry();
         $partStreamRegistry->expects($this->once())
-            ->method('attachPartStreamHandle')
+            ->method('attachContentPartStreamHandle')
             ->with($this->anything(), $this->anything(), $startPos, $endPos);
         
         $this->callParserWithEmail($email, $message, $partFactory, $partStreamRegistry);
@@ -124,8 +124,11 @@ class MessageParserTest extends PHPUnit_Framework_TestCase
             "Content-Type: multipart/alternative;\r\n"
             . " boundary=balderdash\r\n"
             . "Subject: I'm a tiny little wee teapot\r\n"
-            . "\r\n"
-            . "--balderdash\r\n"
+            . "\r\n";
+        
+        $messagePartStart = strlen($email);
+        $email .=
+            "--balderdash\r\n"
             . "Content-Type: text/html\r\n"
             . "\r\n";
         $partOneStart = strlen($email);
@@ -173,9 +176,10 @@ class MessageParserTest extends PHPUnit_Framework_TestCase
         $partFactory = $this->getMockedPartFactory();
         $partFactory->method('newMimePart')->will($this->onConsecutiveCalls($firstPart, $secondPart, $this->getMockedPart()));
         $partStreamRegistry = $this->getMockedPartStreamRegistry();
-        $partStreamRegistry->expects($this->exactly(2))
-            ->method('attachPartStreamHandle')
+        $partStreamRegistry->expects($this->exactly(3))
+            ->method('attachContentPartStreamHandle')
             ->withConsecutive(
+                [$message, $message, $messagePartStart, $messagePartStart],
                 [$firstPart, $message, $partOneStart, $partOneEnd],
                 [$secondPart, $message, $partTwoStart, $partTwoEnd]
             );
@@ -187,13 +191,23 @@ class MessageParserTest extends PHPUnit_Framework_TestCase
         $email =
             "Content-Type: multipart/mixed; boundary=balderdash\r\n"
             . "Subject: Of mice and men\r\n"
-            . "\r\n"
-            . "This existed for nought - hidden from view\r\n"
-            . "--balderdash\r\n"
+            . "\r\n";
+        
+        $messagePartStart = strlen($email);
+        $email .= "This existed for nought - hidden from view\r\n";
+        $messagePartEnd = strlen($email);
+        
+        $email .=
+            "--balderdash\r\n"
             . "Content-Type: multipart/alternative; boundary=gobbledygook\r\n"
-            . "\r\n"
-            . "A line to fool the senses was created... and it was this line\r\n"
-            . "--gobbledygook\r\n"
+            . "\r\n";
+        
+        $altPartStart = strlen($email);
+        $email .= "A line to fool the senses was created... and it was this line\r\n";
+        $altPartEnd = strlen($email);
+        
+        $email .= 
+            "--gobbledygook\r\n"
             . "Content-Type: text/html\r\n"
             . "\r\n";
         $partOneStart = strlen($email);
@@ -271,14 +285,9 @@ class MessageParserTest extends PHPUnit_Framework_TestCase
             ->willReturn('multipart/mixed');
         $message->method('getHeaderParameter')
             ->willReturn('balderdash');
-        $message->expects($this->exactly(4))
-            ->method('addPart')
-            ->withConsecutive(
-                [$secondPart],
-                [$thirdPart],
-                [$fourthPart],
-                [$fifthPart]
-            );
+        
+        $message->expects($this->exactly(3))
+            ->method('addPart');
         
         $partFactory = $this->getMockedPartFactory();
         $partFactory->method('newMimePart')->will($this->onConsecutiveCalls(
@@ -290,9 +299,11 @@ class MessageParserTest extends PHPUnit_Framework_TestCase
             $this->getMockedPart()
         ));
         $partStreamRegistry = $this->getMockedPartStreamRegistry();
-        $partStreamRegistry->expects($this->exactly(4))
-            ->method('attachPartStreamHandle')
+        $partStreamRegistry->expects($this->exactly(6))
+            ->method('attachContentPartStreamHandle')
             ->withConsecutive(
+                [$message, $message, $messagePartStart, $messagePartEnd],
+                [$this->anything(), $message, $altPartStart, $altPartEnd],
                 [$this->anything(), $message, $partOneStart, $partOneEnd],
                 [$thirdPart, $message, $partTwoStart, $partTwoEnd],
                 [$fourthPart, $message, $partThreeStart, $partThreeEnd],
@@ -333,7 +344,7 @@ class MessageParserTest extends PHPUnit_Framework_TestCase
             return $self->getMockedUUEncodedPart();
         }));
         $partStreamRegistry = $this->getMockedPartStreamRegistry();
-        $partStreamRegistry->method('attachPartStreamHandle')
+        $partStreamRegistry->method('attachContentPartStreamHandle')
             ->withConsecutive(
                 [$this->anything(), $this->anything(), $startPos, $endPos],
                 [$this->anything(), $this->anything(), $startPos2, $endPos2]
@@ -368,7 +379,7 @@ class MessageParserTest extends PHPUnit_Framework_TestCase
         }));
         $partStreamRegistry = $this->getMockedPartStreamRegistry();
         $partStreamRegistry->expects($this->once())
-            ->method('attachPartStreamHandle')
+            ->method('attachContentPartStreamHandle')
             ->with($this->anything(), $this->anything(), $startPos, $endPos);
         
         $this->callParserWithEmail($email, $message, $partFactory, $partStreamRegistry);

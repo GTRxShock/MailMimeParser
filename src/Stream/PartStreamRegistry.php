@@ -6,14 +6,14 @@
  */
 namespace ZBateson\MailMimeParser\Stream;
 
-use ZBateson\MailMimeParser\MimePart;
+use ZBateson\MailMimeParser\Message\MimePart;
 use ZBateson\MailMimeParser\Message;
 
 /**
  * Factory class for PartStream objects and registration class for Message
  * handles.
  * 
- * PartStreamRegistry is used for \ZBateson\MailMimeParser\MessageParser to
+ * PartStreamRegistry is used for \ZBateson\MailMimeParser\Message\MessageParser to
  * register Message stream handles for opening with PartStreams, and to open
  * file handles for specific mime parts of a message.  The PartStreamRegistry
  * maintains a list of opened resources, closing them either when unregistering
@@ -27,7 +27,7 @@ class PartStreamRegistry
      * @var array Array of handles, with message IDs as keys.
      */
     private $registeredHandles;
-
+    
     /**
      * @var int[] number of registered part stream handles with message IDs as
      * keys
@@ -104,7 +104,7 @@ class PartStreamRegistry
      * Attaches a stream filter on the passed resource $handle for the part's
      * encoding.
      * 
-     * @param \ZBateson\MailMimeParser\MimePart $part
+     * @param \ZBateson\MailMimeParser\Message\MimePart $part
      * @param resource $handle
      */
     private function attachEncodingFilterToStream(MimePart $part, $handle)
@@ -112,10 +112,10 @@ class PartStreamRegistry
         $encoding = strtolower($part->getHeaderValue('Content-Transfer-Encoding'));
         switch ($encoding) {
             case 'quoted-printable':
-                stream_filter_append($handle, 'convert.quoted-printable-decode', STREAM_FILTER_READ);
+                stream_filter_append($handle, 'mmp-convert.quoted-printable-decode', STREAM_FILTER_READ);
                 break;
             case 'base64':
-                stream_filter_append($handle, 'convert.base64-decode', STREAM_FILTER_READ);
+                stream_filter_append($handle, 'mmp-convert.base64-decode', STREAM_FILTER_READ);
                 break;
             case 'x-uuencode':
                 stream_filter_append($handle, 'mailmimeparser-uudecode', STREAM_FILTER_READ);
@@ -129,13 +129,12 @@ class PartStreamRegistry
      * Attaches a mailmimeparser-encode stream filter based on the part's
      * defined charset.
      * 
-     * @param \ZBateson\MailMimeParser\MimePart $part
+     * @param \ZBateson\MailMimeParser\Message\MimePart $part
      * @param resource $handle
      */
     private function attachCharsetFilterToStream(MimePart $part, $handle)
     {
-        $contentType = strtolower($part->getHeaderValue('Content-Type', 'text/plain'));
-        if (strpos($contentType, 'text/') === 0) {
+        if ($part->isTextPart()) {
             stream_filter_append(
                 $handle,
                 'mailmimeparser-encode',
@@ -154,7 +153,7 @@ class PartStreamRegistry
      * @param int $start
      * @param int $end
      */
-    public function attachPartStreamHandle(MimePart $part, Message $message, $start, $end)
+    public function attachContentPartStreamHandle(MimePart $part, Message $message, $start, $end)
     {
         $id = $message->getObjectId();
         if (empty($this->registeredHandles[$id])) {
@@ -166,5 +165,26 @@ class PartStreamRegistry
         $this->attachEncodingFilterToStream($part, $handle);
         $this->attachCharsetFilterToStream($part, $handle);
         $part->attachContentResourceHandle($handle);
+    }
+    
+    /**
+     * Creates a part stream handle for the start and end position of the
+     * message stream, and attaches it to the passed MimePart.
+     * 
+     * @param MimePart $part
+     * @param Message $message
+     * @param int $start
+     * @param int $end
+     */
+    public function attachOriginalPartStreamHandle(MimePart $part, Message $message, $start, $end)
+    {
+        $id = $message->getObjectId();
+        if (empty($this->registeredHandles[$id])) {
+            return null;
+        }
+        $handle = fopen('mmp-mime-message://' . $id . '?start=' .
+            $start . '&end=' . $end, 'r');
+        
+        $part->attachOriginalStreamHandle($handle);
     }
 }

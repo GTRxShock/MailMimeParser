@@ -6,13 +6,18 @@
  */
 namespace ZBateson\MailMimeParser;
 
+use ZBateson\MailMimeParser\Message\MessageParser;
+use ZBateson\MailMimeParser\Message\MimePartFactory;
+use ZBateson\MailMimeParser\Message\Writer\MessageWriterService;
 use ZBateson\MailMimeParser\Header\Consumer\ConsumerService;
 use ZBateson\MailMimeParser\Header\HeaderFactory;
 use ZBateson\MailMimeParser\Stream\PartStream;
+use ZBateson\MailMimeParser\Stream\UUDecodeStreamFilter;
 use ZBateson\MailMimeParser\Stream\UUEncodeStreamFilter;
 use ZBateson\MailMimeParser\Stream\CharsetStreamFilter;
-use ZBateson\MailMimeParser\Stream\QuotedPrintableDecodeStreamFilter;
+use ZBateson\MailMimeParser\Stream\ConvertStreamFilter;
 use ZBateson\MailMimeParser\Stream\Base64DecodeStreamFilter;
+use ZBateson\MailMimeParser\Stream\Base64EncodeStreamFilter;
 use ZBateson\MailMimeParser\Stream\Helper\CharsetConverter;
 
 /**
@@ -26,7 +31,7 @@ use ZBateson\MailMimeParser\Stream\Helper\CharsetConverter;
 class SimpleDi
 {
     /**
-     * @var \ZBateson\MailMimeParser\MimePartFactory singleton 'service' instance
+     * @var \ZBateson\MailMimeParser\Message\MimePartFactory singleton 'service' instance
      */
     protected $partFactory;
     
@@ -61,6 +66,13 @@ class SimpleDi
     protected $consumerService;
     
     /**
+     * @var \ZBateson\MailMimeParser\Message\Writer\MessageWriterService 
+     * singleton 'service' instance for getting MimePartWriter and MessageWriter
+     * instances
+     */
+    protected $messageWriterService;
+    
+    /**
      * Constructs a SimpleDi - call singleton() to invoke
      */
     private function __construct()
@@ -75,7 +87,7 @@ class SimpleDi
     public static function singleton()
     {
         static $singleton = null;
-        if (empty($singleton)) {
+        if ($singleton === null) {
             $singleton = new SimpleDi();
         }
         return $singleton;
@@ -100,7 +112,7 @@ class SimpleDi
     /**
      * Constructs and returns a new MessageParser object.
      * 
-     * @return \ZBateson\MailMimeParser\MessageParser
+     * @return \ZBateson\MailMimeParser\Message\MessageParser
      */
     public function newMessageParser()
     {
@@ -119,8 +131,23 @@ class SimpleDi
     public function newMessage()
     {
         return new Message(
-            $this->getHeaderFactory()
+            $this->getHeaderFactory(),
+            $this->getMessageWriterService()->getMessageWriter(),
+            $this->getPartFactory()
         );
+    }
+    
+    /**
+     * Returns a MessageWriterService instance.
+     * 
+     * @return MessageWriterService
+     */
+    public function getMessageWriterService()
+    {
+        if ($this->messageWriterService === null) {
+            $this->messageWriterService = new MessageWriterService();
+        }
+        return $this->messageWriterService;
     }
     
     /**
@@ -141,13 +168,14 @@ class SimpleDi
     /**
      * Returns the part factory service instance.
      * 
-     * @return \ZBateson\MailMimeParser\MimePartFactory
+     * @return \ZBateson\MailMimeParser\Message\MimePartFactory
      */
     public function getPartFactory()
     {
         if ($this->partFactory === null) {
             $this->partFactory = new MimePartFactory(
-                $this->getHeaderFactory()
+                $this->getHeaderFactory(),
+                $this->getMessageWriterService()
             );
         }
         return $this->partFactory;
@@ -224,24 +252,36 @@ class SimpleDi
      */
     protected function registerStreamExtensions()
     {
+        stream_filter_register(UUDecodeStreamFilter::STREAM_FILTER_NAME, __NAMESPACE__ . '\Stream\UUDecodeStreamFilter');
         stream_filter_register(UUEncodeStreamFilter::STREAM_FILTER_NAME, __NAMESPACE__ . '\Stream\UUEncodeStreamFilter');
         stream_filter_register(CharsetStreamFilter::STREAM_FILTER_NAME, __NAMESPACE__ . '\Stream\CharsetStreamFilter');
         stream_wrapper_register(PartStream::STREAM_WRAPPER_PROTOCOL, __NAMESPACE__ . '\Stream\PartStream');
         
-        // hhvm compatibility -- at time of writing, no convert.* filters 
-        // should return false if already registered
-        $filters = stream_get_filters();
-        // @codeCoverageIgnoreStart
-        if (!in_array('convert.*', $filters)) {
-            stream_filter_register(
-                QuotedPrintableDecodeStreamFilter::STREAM_FILTER_NAME,
-                __NAMESPACE__ . '\Stream\QuotedPrintableDecodeStreamFilter'
-            );
-            stream_filter_register(
-                Base64DecodeStreamFilter::STREAM_FILTER_NAME,
-                __NAMESPACE__ . '\Stream\Base64DecodeStreamFilter'
-            );
-        }
-        // @codeCoverageIgnoreEnd
+        // originally created for HHVM compatibility, but decided to use them
+        // instead of built-in stream filters for reliability -- it seems the
+        // built-in base64-decode and encode stream filter does pretty much the
+        // same thing as HHVM's -- it only works on smaller streams where the
+        // entire stream comes in a single buffer.
+        // In addition, in HHVM 3.15 there seems to be a problem registering
+        // 'convert.quoted-printable-decode/encode -- so to make things simple
+        // decided to use my version instead and name them mmp-convert.*
+        // In 3.18-3.20, it seems we're not able to overwrite 'convert.*'
+        // filters, so now they're all named mmp-convert.*
+        stream_filter_register(
+            'mmp-convert.quoted-printable-decode',
+            __NAMESPACE__ . '\Stream\ConvertStreamFilter'
+        );
+        stream_filter_register(
+            'mmp-convert.quoted-printable-encode',
+            __NAMESPACE__ . '\Stream\ConvertStreamFilter'
+        );
+        stream_filter_register(
+            Base64EncodeStreamFilter::STREAM_FILTER_NAME,
+            __NAMESPACE__ . '\Stream\Base64EncodeStreamFilter'
+        );
+        stream_filter_register(
+            Base64DecodeStreamFilter::STREAM_FILTER_NAME,
+            __NAMESPACE__ . '\Stream\Base64DecodeStreamFilter'
+        );
     }
 }

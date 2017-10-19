@@ -1,5 +1,5 @@
 <?php
-namespace ZBateson\MailMimeParser;
+namespace ZBateson\MailMimeParser\Message;
 
 use PHPUnit_Framework_TestCase;
 use ZBateson\MailMimeParser\Header\HeaderFactory;
@@ -11,8 +11,8 @@ use ZBateson\MailMimeParser\Header\Part\MimeLiteralPartFactory;
  * Description of UUEncodedPartTest
  *
  * @group UUEncodedPart
- * @group Base
- * @covers ZBateson\MailMimeParser\UUEncodedPart
+ * @group Message
+ * @covers ZBateson\MailMimeParser\Message\UUEncodedPart
  * @author Zaahid Bateson
  */
 class UUEncodedPartTest extends PHPUnit_Framework_TestCase
@@ -24,7 +24,11 @@ class UUEncodedPartTest extends PHPUnit_Framework_TestCase
         $cs = new ConsumerService($pf, $mlpf);
         $hf = new HeaderFactory($cs, $pf);
         
-        $part = new UUEncodedPart($hf, 0754, 'test-file.ext');
+        $pw = $this->getMockBuilder('ZBateson\MailMimeParser\Message\Writer\MimePartWriter')
+            ->disableOriginalConstructor()
+            ->getMock();
+        
+        $part = new UUEncodedPart($hf, $pw, 0754, 'test-file.ext');
         $this->assertNotNull($part);
         
         $this->assertEquals('application/octet-stream', $part->getHeaderValue('Content-Type'));

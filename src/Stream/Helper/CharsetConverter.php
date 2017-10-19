@@ -399,9 +399,9 @@ class CharsetConverter
     private function findAliasedIconvCharset($comp, $stripped)
     {
         if (array_key_exists($comp, self::$iconvAliases)) {
-            return self::$iconvAliases[$comp];
+            return static::$iconvAliases[$comp];
         } elseif (array_key_exists($stripped, self::$iconvAliases)) {
-            return self::$iconvAliases[$stripped];
+            return static::$iconvAliases[$stripped];
         }
         return $comp;
     }

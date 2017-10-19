@@ -9,16 +9,25 @@ namespace ZBateson\MailMimeParser\Stream;
 use php_user_filter;
 
 /**
- * Stream filter converts binary streams to uuencoded text.
- *
+ * Unfortunately neither the built-in base64 encoder in PHP, nor the HHVM
+ * implementation for their ConvertFilter seem to handle large streams
+ * correctly.  There appears to be no provision for data coming in when they're
+ * not split on 3 byte-chunks (each 3-byte chunk trnaslates to 4-bytes of base64
+ * encoded data).
+ * 
  * @author Zaahid Bateson
  */
-class UUEncodeStreamFilter extends php_user_filter
+class Base64EncodeStreamFilter extends php_user_filter
 {
     /**
      * Name used when registering with stream_filter_register.
      */
-    const STREAM_FILTER_NAME = 'mailmimeparser-uuencode';
+    const STREAM_FILTER_NAME = 'mmp-convert.base64-encode';
+    
+    /**
+     * @var int number of bytes written for chunk-splitting
+     */
+    private $numBytesWritten = 0;
     
     /**
      * @var StreamLeftover
@@ -26,52 +35,23 @@ class UUEncodeStreamFilter extends php_user_filter
     private $leftovers;
     
     /**
-     * @var bool
-     */
-    private $headerWritten = false;
-    
-    /**
-     * UUEncodes the passed $data string and appends it to $out.
+     * Base64-encodes the passed $data string and appends it to $out.
      * 
      * @param string $data data to convert
      * @param resource $out output bucket stream
      */
     private function convertAndAppend($data, $out)
     {
-        $converted = preg_replace('/\r\n|\r|\n/', "\r\n", convert_uuencode($data));
-        $cleaned = rtrim(substr(rtrim($converted), 0, -1));      // remove end line ` character
-        if ($cleaned === '') {
-            return;
-        }
-        $cleaned = "\r\n" . $cleaned;
-        stream_bucket_append($out, stream_bucket_new($this->stream, $cleaned));
-    }
-    
-    /**
-     * Writes out the header for a uuencoded part to the passed stream resource
-     * handle.
-     * 
-     * @param resource $out
-     */
-    private function writeUUEncodingHeader($out)
-    {
-        $data = 'begin 666 ';
-        if (isset($this->params['filename'])) {
-            $data .= $this->params['filename'];
+        $converted = base64_encode($data);
+        $numBytes = strlen($converted);
+        if ($this->numBytesWritten != 0) {
+            $next = (76 - ($this->numBytesWritten % 76)) % 76;
+            $converted = substr($converted, 0, $next) . "\r\n" . rtrim(chunk_split(substr($converted, $next), 76));
         } else {
-            $data .= 'null';
+            $converted = rtrim(chunk_split($converted));
         }
-        stream_bucket_append($out, stream_bucket_new($this->stream, $data));
-    }
-    
-    /**
-     * Returns the footer for a uuencoded part.
-     * 
-     * @return string
-     */
-    private function getUUEncodingFooter()
-    {
-        return "\r\n`\r\nend";
+        $this->numBytesWritten += $numBytes;
+        stream_bucket_append($out, stream_bucket_new($this->stream, $converted));
     }
     
     /**
@@ -86,21 +66,15 @@ class UUEncodeStreamFilter extends php_user_filter
     {
         while ($bucket = stream_bucket_make_writeable($in)) {
             $data = $this->leftovers->value . $bucket->data;
-            if (!$this->headerWritten) {
-                $this->writeUUEncodingHeader($out);
-                $this->headerWritten = true;
-            }
             $consumed += $bucket->datalen;
-            $nRemain = strlen($data) % 45;
+            $nRemain = strlen($data) % 3;
             $toConvert = $data;
             if ($nRemain === 0) {
                 $this->leftovers->value = '';
-                $this->leftovers->encodedValue = $this->getUUEncodingFooter();
+                $this->leftovers->encodedValue = '';
             } else {
                 $this->leftovers->value = substr($data, -$nRemain);
-                $this->leftovers->encodedValue = "\r\n" .
-                    rtrim(substr(rtrim(convert_uuencode($this->leftovers->value)), 0, -1))
-                    . $this->getUUEncodingFooter();
+                $this->leftovers->encodedValue = base64_encode($this->leftovers->value);
                 $toConvert = substr($data, 0, -$nRemain);
             }
             $this->convertAndAppend($toConvert, $out);
@@ -129,6 +103,8 @@ class UUEncodeStreamFilter extends php_user_filter
     {
         if (isset($this->params['leftovers'])) {
             $this->leftovers = $this->params['leftovers'];
+        } else {
+            $this->leftovers = new StreamLeftover();
         }
     }
 }
